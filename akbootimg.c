@@ -1,5 +1,7 @@
-/* abootimg -  Manipulate (read, modify, create) Android Boot Images
+/* akbootimg - Manipulate (read, modify, create) Android Boot Images
+ * Based on abootimg, modified for Antorya Kernel
  * Copyright (c) 2010-2011 Gilles Grandou <gilles@grandou.net>
+ * Copyright (c) 2017 Fatih Ünsever <fatihunseverr@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -10,12 +12,7 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
-
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -26,44 +23,23 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-
 #ifdef __linux__
 #include <sys/ioctl.h>
 #include <linux/fs.h> /* BLKGETSIZE64 */
 #endif
 
-#ifdef __CYGWIN__
-#include <sys/ioctl.h>
-#include <cygwin/fs.h> /* BLKGETSIZE64 */
-#endif
-
-#if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
-#include <sys/disk.h> /* DIOCGMEDIASIZE */
-#include <sys/sysctl.h>
-#endif
-
-#if defined(__APPLE__)
-# include <sys/disk.h> /* DKIOCGETBLOCKCOUNT */
-#endif
-
-
 #ifdef HAS_BLKID
 #include <blkid/blkid.h>
 #endif
 
-#include "version.h"
 #include "bootimg.h"
 
-
 enum command {
-  none,
   help,
-  info,
   extract,
   update,
   create
 };
-
 
 typedef struct
 {
@@ -83,13 +59,10 @@ typedef struct
   char*        kernel;
   char*        ramdisk;
   char*        second;
-} t_abootimg;
-
+} t_akbootimg;
 
 #define MAX_CONF_LEN    4096
 char config_args[MAX_CONF_LEN] = "";
-
-
 
 void abort_perror(char* str)
 {
@@ -107,88 +80,43 @@ void abort_printf(char *fmt, ...)
   exit(1);
 }
 
-
 int blkgetsize(int fd, unsigned long long *pbsize)
 {
-# if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
-  return ioctl(fd, DIOCGMEDIASIZE, pbsize);
-# elif defined(__APPLE__)
-  return ioctl(fd, DKIOCGETBLOCKCOUNT, pbsize);
-# elif defined(__NetBSD__)
-  // does a suitable ioctl exist?
-  // return (ioctl(fd, DIOCGDINFO, &label) == -1);
-  return 1;
-# elif defined(__linux__) || defined(__CYGWIN__)
+# if defined(__linux__)
   return ioctl(fd, BLKGETSIZE64, pbsize);
-# elif defined(__GNU__)
-  // does a suitable ioctl for HURD exist?
-  return 1;
 # else
   return 1;
 # endif
-
 }
 
 void print_usage(void)
 {
   printf (
- " abootimg - manipulate Android Boot Images.\n"
- " (c) 2010-2011 Gilles Grandou <gilles@grandou.net>\n"
- " " VERSION_STR "\n"
- "\n"
- " abootimg [-h]\n"
- "\n"
- "      print usage\n"
- "\n"
- " abootimg -i <bootimg>\n"
- "\n"
- "      print boot image information\n"
- "\n"
- " abootimg -x <bootimg> [<bootimg.cfg> [<kernel> [<ramdisk> [<secondstage>]]]]\n"
- "\n"
- "      extract objects from boot image:\n"
- "      - config file (default name bootimg.cfg)\n"
- "      - kernel image (default name zImage)\n"
- "      - ramdisk image (default name initrd.img)\n"
- "      - second stage image (default name stage2.img)\n"
- "\n"
- " abootimg -u <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] [-k <kernel>] [-r <ramdisk>] [-s <secondstage>]\n"
- "\n"
- "      update a current boot image with objects given in command line\n"
- "      - header informations given in arguments (several can be provided)\n"
- "      - header informations given in config file\n"
- "      - kernel image\n"
- "      - ramdisk image\n"
- "      - second stage image\n"
- "\n"
- "      bootimg has to be valid Android Boot Image, or the update will abort.\n"
- "\n"
- " abootimg --create <bootimg> [-c \"param=value\"] [-f <bootimg.cfg>] -k <kernel> -r <ramdisk> [-s <secondstage>]\n"
- "\n"
- "      create a new image from scratch.\n"
- "      if the boot image file is a block device, sanity check will be performed to avoid overwriting a existing\n"
- "      filesystem.\n"
- "\n"
- "      argurments are the same than for -u.\n"
- "      kernel and ramdisk are mandatory.\n"
- "\n"
-    );
+  "akbootimg - Manipulate (read, modify, create) Android Boot Images\n"
+  "Based on abootimg, modified for Antorya Kernel\n"
+  "(c) 2017 Fatih Ünsever <fatihunseverr@gmail.com>\n"
+  " Usage:\n"
+  "   -x -- unpack an Android boot image\n"
+  "   akbootimg -x boot.img\n"
+  "   -----------------------------------\n"
+  "   -u -- update an Android boot image\n"
+  "   akbootimg -u boot.img [-b \"param=value\"] [-f boot.info] [-k <kernel>] [-r <ramdisk>] [-s <secondstage>]\n"
+  "   -----------------------------------\n"
+  "   -t -- create an Android boot image\n"
+  "   akbootimg -t boot.img [-b \"param=value\"] [-f boot.info] -k <kernel> -r <ramdisk> [-s <secondstage>]\n"
+  );
 }
 
-
-enum command parse_args(int argc, char** argv, t_abootimg* img)
+enum command parse_args(int argc, char** argv, t_akbootimg* img)
 {
-  enum command cmd = none;
+  enum command cmd = help;
   int i;
 
   if (argc<2)
-    return none;
+    return help;
 
   if (!strcmp(argv[1], "-h")) {
     return help;
-  }
-  else if (!strcmp(argv[1], "-i")) {
-    cmd=info;
   }
   else if (!strcmp(argv[1], "-x")) {
     cmd=extract;
@@ -196,26 +124,19 @@ enum command parse_args(int argc, char** argv, t_abootimg* img)
   else if (!strcmp(argv[1], "-u")) {
     cmd=update;
   }
-  else if (!strcmp(argv[1], "--create")) {
+  else if (!strcmp(argv[1], "-t")) {
     cmd=create;
   }
   else
-    return none;
+    return help;
 
   switch(cmd) {
-    case none:
     case help:
 	    break;
-
-    case info:
-      if (argc != 3)
-        return none;
-      img->fname = argv[2];
-      break;
       
     case extract:
       if ((argc < 3) || (argc > 7))
-        return none;
+        return help;
       img->fname = argv[2];
       if (argc >= 4)
         img->config_fname = argv[3];
@@ -230,7 +151,7 @@ enum command parse_args(int argc, char** argv, t_abootimg* img)
     case update:
     case create:
       if (argc < 3)
-        return none;
+        return help;
       img->fname = argv[2];
       img->config_fname = NULL;
       img->kernel_fname = NULL;
@@ -239,7 +160,7 @@ enum command parse_args(int argc, char** argv, t_abootimg* img)
       for(i=3; i<argc; i++) {
         if (!strcmp(argv[i], "-c")) {
           if (++i >= argc)
-            return none;
+            return help;
           unsigned len = strlen(argv[i]);
           if (strlen(config_args)+len+1 >= MAX_CONF_LEN)
             abort_printf("too many config parameters.\n");
@@ -248,26 +169,26 @@ enum command parse_args(int argc, char** argv, t_abootimg* img)
         }
         else if (!strcmp(argv[i], "-f")) {
           if (++i >= argc)
-            return none;
+            return help;
           img->config_fname = argv[i];
         }
         else if (!strcmp(argv[i], "-k")) {
           if (++i >= argc)
-            return none;
+            return help;
           img->kernel_fname = argv[i];
         }
         else if (!strcmp(argv[i], "-r")) {
           if (++i >= argc)
-            return none;
+            return help;
           img->ramdisk_fname = argv[i];
         }
         else if (!strcmp(argv[i], "-s")) {
           if (++i >= argc)
-            return none;
+            return help;
           img->second_fname = argv[i];
         }
         else
-          return none;
+          return help;
       }
       break;
   }
@@ -275,9 +196,7 @@ enum command parse_args(int argc, char** argv, t_abootimg* img)
   return cmd;
 }
 
-
-
-int check_boot_img_header(t_abootimg* img)
+int check_boot_img_header(t_akbootimg* img)
 {
   if (strncmp((char*)(img->header.magic), BOOT_MAGIC, BOOT_MAGIC_SIZE)) {
     fprintf(stderr, "%s: no Android Magic Value\n", img->fname);
@@ -314,9 +233,7 @@ int check_boot_img_header(t_abootimg* img)
   return 0;
 }
 
-
-
-void check_if_block_device(t_abootimg* img)
+void check_if_block_device(t_akbootimg* img)
 {
   struct stat st;
 
@@ -348,18 +265,14 @@ void check_if_block_device(t_abootimg* img)
 #endif
 }
 
-
-
-void open_bootimg(t_abootimg* img, char* mode)
+void open_bootimg(t_akbootimg* img, char* mode)
 {
   img->stream = fopen(img->fname, mode);
   if (!img->stream)
     abort_perror(img->fname);
 }
 
-
-
-void read_header(t_abootimg* img)
+void read_header(t_akbootimg* img)
 {
   size_t rb = fread(&img->header, sizeof(boot_img_hdr), 1, img->stream);
   if ((rb!=1) || ferror(img->stream))
@@ -389,9 +302,7 @@ void read_header(t_abootimg* img)
     abort_printf("%s: not a valid Android Boot Image.\n", img->fname);
 }
 
-
-
-void update_header_entry(t_abootimg* img, char* cmd)
+void update_header_entry(t_akbootimg* img, char* cmd)
 {
   char *p;
   char *token;
@@ -427,10 +338,6 @@ void update_header_entry(t_abootimg* img, char* cmd)
     memset(img->header.cmdline, 0, BOOT_ARGS_SIZE);
     strcpy((char*)(img->header.cmdline), value);
   }
-  else if (!strncmp(token, "name", 4)) {
-    strncpy((char*)(img->header.name), value, BOOT_NAME_SIZE);
-    img->header.name[BOOT_NAME_SIZE-1] = '\0';
-  }
   else if (!strncmp(token, "bootsize", 8)) {
     if (img->is_blkdev && (img->size != valuenum))
       abort_printf("%s: cannot change Boot Image size for a block device\n", img->fname);
@@ -459,15 +366,14 @@ err:
   abort_printf("%s: bad config entry\n", token);
 }
 
-
-void update_header(t_abootimg* img)
+void update_header(t_akbootimg* img)
 {
   if (img->config_fname) {
     FILE* config_file = fopen(img->config_fname, "r");
     if (!config_file)
       abort_perror(img->config_fname);
 
-    printf("reading config file %s\n", img->config_fname);
+    //printf("reading config file %s\n", img->config_fname);
 
     char* line = NULL;
     size_t len = 0;
@@ -504,9 +410,7 @@ void update_header(t_abootimg* img)
   }
 }
 
-
-
-void update_images(t_abootimg *img)
+void update_images(t_akbootimg *img)
 {
   unsigned page_size = img->header.page_size;
   unsigned ksize = img->header.kernel_size;
@@ -524,7 +428,7 @@ void update_images(t_abootimg *img)
   unsigned soffset = (1+n+m)*page_size;
 
   if (img->kernel_fname) {
-    printf("reading kernel from %s\n", img->kernel_fname);
+    //printf("reading kernel from %s\n", img->kernel_fname);
     FILE* stream = fopen(img->kernel_fname, "r");
     if (!stream)
       abort_perror(img->kernel_fname);
@@ -546,7 +450,7 @@ void update_images(t_abootimg *img)
   }
 
   if (img->ramdisk_fname) {
-    printf("reading ramdisk from %s\n", img->ramdisk_fname);
+    //printf("reading ramdisk from %s\n", img->ramdisk_fname);
     FILE* stream = fopen(img->ramdisk_fname, "r");
     if (!stream)
       abort_perror(img->ramdisk_fname);
@@ -628,14 +532,12 @@ void update_images(t_abootimg *img)
     abort_printf("%s: updated is too big for the Boot Image (%u vs %u bytes)\n", img->fname, total_size, img->size);
 }
 
-
-
-void write_bootimg(t_abootimg* img)
+void write_bootimg(t_akbootimg* img)
 {
   unsigned psize;
   char* padding;
 
-  printf ("Writing Boot Image %s\n", img->fname);
+  //printf ("Writing Boot Image %s\n", img->fname);
 
   psize = img->header.page_size;
   padding = calloc(psize, 1);
@@ -698,58 +600,15 @@ void write_bootimg(t_abootimg* img)
   free(padding);
 }
 
-
-
-void print_bootimg_info(t_abootimg* img)
+void write_bootimg_config(t_akbootimg* img)
 {
-  printf ("\nAndroid Boot Image Info:\n\n");
-
-  printf ("* file name = %s %s\n\n", img->fname, img->is_blkdev ? "[block device]":"");
-
-  printf ("* image size = %u bytes (%.2f MB)\n", img->size, (double)img->size/0x100000);
-  printf ("  page size  = %u bytes\n\n", img->header.page_size);
-
-  printf ("* Boot Name = \"%s\"\n\n", img->header.name);
-
-  unsigned kernel_size = img->header.kernel_size;
-  unsigned ramdisk_size = img->header.ramdisk_size;
-  unsigned second_size = img->header.second_size;
-
-  printf ("* kernel size       = %u bytes (%.2f MB)\n", kernel_size, (double)kernel_size/0x100000);
-  printf ("  ramdisk size      = %u bytes (%.2f MB)\n", ramdisk_size, (double)ramdisk_size/0x100000);
-  if (second_size)
-    printf ("  second stage size = %u bytes (%.2f MB)\n", ramdisk_size, (double)ramdisk_size/0x100000);
- 
-  printf ("\n* load addresses:\n");
-  printf ("  kernel:       0x%08x\n", img->header.kernel_addr);
-  printf ("  ramdisk:      0x%08x\n", img->header.ramdisk_addr);
-  if (second_size)
-    printf ("  second stage: 0x%08x\n", img->header.second_addr);
-  printf ("  tags:         0x%08x\n\n", img->header.tags_addr);
-
-  if (img->header.cmdline[0])
-    printf ("* cmdline = %s\n\n", img->header.cmdline);
-  else
-    printf ("* empty cmdline\n");
-
-  printf ("* id = ");
-  int i;
-  for (i=0; i<8; i++)
-    printf ("0x%08x ", img->header.id[i]);
-  printf ("\n\n");
-}
-
-
-
-void write_bootimg_config(t_abootimg* img)
-{
-  printf ("writing boot image config in %s\n", img->config_fname);
+  //printf ("writing boot image config in %s\n", img->config_fname);
 
   FILE* config_file = fopen(img->config_fname, "w");
   if (!config_file)
     abort_perror(img->config_fname);
 
-  fprintf(config_file, "bootsize = 0x%x\n", img->size);
+  //fprintf(config_file, "bootsize = 0x%x\n", img->size);
   fprintf(config_file, "pagesize = 0x%x\n", img->header.page_size);
 
   fprintf(config_file, "kerneladdr = 0x%x\n", img->header.kernel_addr);
@@ -757,20 +616,17 @@ void write_bootimg_config(t_abootimg* img)
   fprintf(config_file, "secondaddr = 0x%x\n", img->header.second_addr);
   fprintf(config_file, "tagsaddr = 0x%x\n", img->header.tags_addr);
 
-  fprintf(config_file, "name = %s\n", img->header.name);
   fprintf(config_file, "cmdline = %s\n", img->header.cmdline);
   
   fclose(config_file);
 }
 
-
-
-void extract_kernel(t_abootimg* img)
+void extract_kernel(t_akbootimg* img)
 {
   unsigned psize = img->header.page_size;
   unsigned ksize = img->header.kernel_size;
 
-  printf ("extracting kernel in %s\n", img->kernel_fname);
+  //printf ("extracting kernel in %s\n", img->kernel_fname);
 
   void* k = malloc(ksize);
   if (!k)
@@ -795,9 +651,7 @@ void extract_kernel(t_abootimg* img)
   free(k);
 }
 
-
-
-void extract_ramdisk(t_abootimg* img)
+void extract_ramdisk(t_akbootimg* img)
 {
   unsigned psize = img->header.page_size;
   unsigned ksize = img->header.kernel_size;
@@ -806,7 +660,7 @@ void extract_ramdisk(t_abootimg* img)
   unsigned n = (ksize + psize - 1) / psize;
   unsigned roffset = (1+n)*psize;
 
-  printf ("extracting ramdisk in %s\n", img->ramdisk_fname);
+  //printf ("extracting ramdisk in %s\n", img->ramdisk_fname);
 
   void* r = malloc(rsize);
   if (!r) 
@@ -831,9 +685,7 @@ void extract_ramdisk(t_abootimg* img)
   free(r);
 }
 
-
-
-void extract_second(t_abootimg* img)
+void extract_second(t_akbootimg* img)
 {
   unsigned psize = img->header.page_size;
   unsigned ksize = img->header.kernel_size;
@@ -846,7 +698,7 @@ void extract_second(t_abootimg* img)
   unsigned n = (rsize + ksize + psize - 1) / psize;
   unsigned soffset = (1+n)*psize;
 
-  printf ("extracting second stage image in %s\n", img->second_fname);
+  //printf ("extracting second stage image in %s\n", img->second_fname);
 
   void* s = malloc(ksize);
   if (!s)
@@ -871,19 +723,17 @@ void extract_second(t_abootimg* img)
   free(s);
 }
 
-
-
-t_abootimg* new_bootimg()
+t_akbootimg* new_bootimg()
 {
-  t_abootimg* img;
+  t_akbootimg* img;
 
-  img = calloc(sizeof(t_abootimg), 1);
+  img = calloc(sizeof(t_akbootimg), 1);
   if (!img)
     abort_perror(NULL);
 
-  img->config_fname = "bootimg.cfg";
-  img->kernel_fname = "zImage";
-  img->ramdisk_fname = "initrd.img";
+  img->config_fname = "boot.info";
+  img->kernel_fname = "Image";
+  img->ramdisk_fname = "ramdisk.img";
   img->second_fname = "stage2.img";
 
   memcpy(img->header.magic, BOOT_MAGIC, BOOT_MAGIC_SIZE);
@@ -892,26 +742,14 @@ t_abootimg* new_bootimg()
   return img;
 }
 
-
 int main(int argc, char** argv)
 {
-  t_abootimg* bootimg = new_bootimg();
+  t_akbootimg* bootimg = new_bootimg();
 
   switch(parse_args(argc, argv, bootimg))
   {
-    case none:
-      printf("error - bad arguments\n\n");
-      print_usage();
-      break;
-
     case help:
       print_usage();
-      break;
-
-    case info:
-      open_bootimg(bootimg, "r");
-      read_header(bootimg);
-      print_bootimg_info(bootimg);
       break;
 
     case extract:
@@ -948,5 +786,3 @@ int main(int argc, char** argv)
 
   return 0;
 }
-
-
