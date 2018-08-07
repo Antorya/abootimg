@@ -210,7 +210,11 @@ int check_boot_img_header(t_akbootimg* img)
 
   if (!(img->header.ramdisk_size)) {
     fprintf(stderr, "%s: ramdisk size is null\n", img->fname);
-    return 1;
+    /*
+     * On newer AOSP devices, system can be used as rootfs,
+     * resulting in no initrd being used. Thus this case should
+     * not be fatal.
+     */
   }
 
   unsigned page_size = img->header.page_size;
@@ -770,7 +774,7 @@ int main(int argc, char** argv)
       break;
 
     case create:
-      if (!bootimg->kernel_fname || !bootimg->ramdisk_fname) {
+      if (!bootimg->kernel_fname) {
         print_usage();
         break;
       }
