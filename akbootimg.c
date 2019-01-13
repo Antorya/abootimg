@@ -1,7 +1,7 @@
-/* akbootimg - Manipulate (read, modify, create) Android Boot Images
+/* akbootimg - Manipulate (extract,update and create) Android Boot Images
  * Based on abootimg, modified for Antorya Kernel
  * Copyright (c) 2010-2011 Gilles Grandou <gilles@grandou.net>
- * Copyright (c) 2017 Fatih Ünsever <fatihunseverr@gmail.com>
+ * Copyright (c) 2017-2019 Fatih Ünsever <fatihunseverr@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -92,18 +92,19 @@ int blkgetsize(int fd, unsigned long long *pbsize)
 void print_usage(void)
 {
   printf (
-  "akbootimg - Manipulate (read, modify, create) Android Boot Images\n"
+  "akbootimg - Manipulate (extract,update and create) Android Boot Images\n"
   "Based on abootimg, modified for Antorya Kernel\n"
-  "(c) 2017 Fatih Ünsever <fatihunseverr@gmail.com>\n"
-  " Usage:\n"
-  "   -x -- unpack an Android boot image\n"
-  "   akbootimg -x boot.img\n"
-  "   -----------------------------------\n"
-  "   -u -- update an Android boot image\n"
-  "   akbootimg -u boot.img [-b \"param=value\"] [-f boot.info] [-k <kernel>] [-r <ramdisk>] [-s <secondstage>]\n"
-  "   -----------------------------------\n"
-  "   -t -- create an Android boot image\n"
-  "   akbootimg -t boot.img [-b \"param=value\"] [-f boot.info] -k <kernel> -r <ramdisk> [-s <secondstage>]\n"
+  "Copyright (c) 2010-2011 Gilles Grandou <gilles@grandou.net>\n"
+  "Copyright (c) 2017-2019 Fatih Ünsever <fatihunseverr@gmail.com>\n"
+  "Usage:\n"
+  "  -x -- Extract an Android boot image\n"
+  "  akbootimg -x boot.img\n"
+  "  -----------------------------------\n"
+  "  -u -- Update an Android boot image\n"
+  "  akbootimg -u boot.img [-b 'param=value'] [-f boot.info] [-k <kernel>] [-r <ramdisk>] [-s <secondstage>]\n"
+  "  -----------------------------------\n"
+  "  -c -- Create an Android boot image\n"
+  "  akbootimg -c boot.img [-b 'param=value'] [-f boot.info] -k <kernel> -r <ramdisk> [-s <secondstage>]\n"
   );
 }
 
@@ -124,7 +125,7 @@ enum command parse_args(int argc, char** argv, t_akbootimg* img)
   else if (!strcmp(argv[1], "-u")) {
     cmd=update;
   }
-  else if (!strcmp(argv[1], "-t")) {
+  else if (!strcmp(argv[1], "-c")) {
     cmd=create;
   }
   else
@@ -133,7 +134,7 @@ enum command parse_args(int argc, char** argv, t_akbootimg* img)
   switch(cmd) {
     case help:
 	    break;
-      
+
     case extract:
       if ((argc < 3) || (argc > 7))
         return help;
@@ -192,7 +193,7 @@ enum command parse_args(int argc, char** argv, t_akbootimg* img)
       }
       break;
   }
-  
+
   return cmd;
 }
 
@@ -258,7 +259,7 @@ void check_if_block_device(t_akbootimg* img)
     int fd = open(img->fname, O_RDONLY);
     if (fd == -1)
       abort_perror(img->fname);
-    
+
     unsigned long long bsize = 0;
     if (blkgetsize(fd, &bsize))
       abort_perror(img->fname);
@@ -320,7 +321,7 @@ void update_header_entry(t_akbootimg* img, char* cmd)
   p = cmd;
   p += strspn(p, " \t");
   token = p;
-  
+
   p += strcspn(p, " =\t");
   endtoken = p;
   p += strspn(p, " \t");
@@ -334,10 +335,10 @@ void update_header_entry(t_akbootimg* img, char* cmd)
   *endtoken = '\0';
 
   unsigned valuenum = strtoul(value, NULL, 0);
-  
+
   if (!strcmp(token, "cmdline")) {
     unsigned len = strlen(value);
-    if (len >= BOOT_ARGS_SIZE) 
+    if (len >= BOOT_ARGS_SIZE)
       abort_printf("cmdline length (%d) is too long (max %d)", len, BOOT_ARGS_SIZE-1);
     memset(img->header.cmdline, 0, BOOT_ARGS_SIZE);
     strcpy((char*)(img->header.cmdline), value);
@@ -490,7 +491,7 @@ void update_images(t_akbootimg *img)
   }
 
   if (img->second_fname) {
-    printf("reading second stage from %s\n", img->second_fname);
+    //printf("reading second stage from %s\n", img->second_fname);
     FILE* stream = fopen(img->second_fname, "r");
     if (!stream)
       abort_perror(img->second_fname);
@@ -614,14 +615,12 @@ void write_bootimg_config(t_akbootimg* img)
 
   //fprintf(config_file, "bootsize = 0x%x\n", img->size);
   fprintf(config_file, "pagesize = 0x%x\n", img->header.page_size);
-
   fprintf(config_file, "kerneladdr = 0x%x\n", img->header.kernel_addr);
   fprintf(config_file, "ramdiskaddr = 0x%x\n", img->header.ramdisk_addr);
   fprintf(config_file, "secondaddr = 0x%x\n", img->header.second_addr);
   fprintf(config_file, "tagsaddr = 0x%x\n", img->header.tags_addr);
-
   fprintf(config_file, "cmdline = %s\n", img->header.cmdline);
-  
+
   fclose(config_file);
 }
 
@@ -642,7 +641,7 @@ void extract_kernel(t_akbootimg* img)
   size_t rb = fread(k, ksize, 1, img->stream);
   if ((rb!=1) || ferror(img->stream))
     abort_perror(img->fname);
- 
+
   FILE* kernel_file = fopen(img->kernel_fname, "w");
   if (!kernel_file)
     abort_perror(img->kernel_fname);
@@ -667,7 +666,7 @@ void extract_ramdisk(t_akbootimg* img)
   //printf ("extracting ramdisk in %s\n", img->ramdisk_fname);
 
   void* r = malloc(rsize);
-  if (!r) 
+  if (!r)
     abort_perror(NULL);
 
   if (fseek(img->stream, roffset, SEEK_SET))
@@ -676,7 +675,7 @@ void extract_ramdisk(t_akbootimg* img)
   size_t rb = fread(r, rsize, 1, img->stream);
   if ((rb!=1) || ferror(img->stream))
     abort_perror(img->fname);
- 
+
   FILE* ramdisk_file = fopen(img->ramdisk_fname, "w");
   if (!ramdisk_file)
     abort_perror(img->ramdisk_fname);
@@ -714,7 +713,7 @@ void extract_second(t_akbootimg* img)
   size_t rb = fread(s, ssize, 1, img->stream);
   if ((rb!=1) || ferror(img->stream))
     abort_perror(img->fname);
- 
+
   FILE* second_file = fopen(img->second_fname, "w");
   if (!second_file)
     abort_perror(img->second_fname);
@@ -764,7 +763,7 @@ int main(int argc, char** argv)
       extract_ramdisk(bootimg);
       extract_second(bootimg);
       break;
-    
+
     case update:
       open_bootimg(bootimg, "r+");
       read_header(bootimg);

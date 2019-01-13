@@ -1,0 +1,2 @@
+## akbootimg
+Tool to extract,update and create android boot images. Android devices use a special partition format to boot any operating system on the devices. These boot-images contain a kernel image, a ramdisk, optionally a 2nd stage boot loader and the commandline passed to the kernel when booting. The original mkbootimg from Android can only create these images where, akbootimg can also extract and modify them. Handling android boot images is necessary when bringing other operating systems to android devices.
