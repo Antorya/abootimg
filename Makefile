@@ -1,5 +1,6 @@
+#CC = arm-none-eabi-gcc
 CPPFLAGS=-DHAS_BLKID
-CFLAGS=-O2 -pipe -fstack-protector-strong -fno-plt -Wall
+CFLAGS= -O2 -g -Wall
 LDLIBS=-lblkid
 
 all: akbootimg

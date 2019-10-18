@@ -95,7 +95,7 @@ void print_usage(void)
   "akbootimg - Manipulate (extract,update and create) Android Boot Images\n"
   "Based on abootimg, modified for Antorya Kernel\n"
   "Copyright (c) 2010-2011 Gilles Grandou <gilles@grandou.net>\n"
-  "Copyright (c) 2017-2019 Fatih Ünsever <fatihunseverr@gmail.com>\n"
+  "Copyright (c) 2017-2019 Fatih Ünsever <mail@fatihunsever.com>\n"
   "Usage:\n"
   "  -x -- Extract an Android boot image\n"
   "  akbootimg -x boot.img\n"
